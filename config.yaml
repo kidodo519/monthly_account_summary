@@ -1,0 +1,54 @@
+drive:
+  folder_id: "130Jks7dvTzbvf1i0YyZcMm5QlI_RZCAq"
+  archive_folder_id: "1U8htdgL5Mrp3BYVSQgldG94vk5RTPyLm"
+  filename_glob: "*.csv"
+  page_size: 100
+
+csv:
+  encoding: "utf-16"
+  sep: ","
+
+  preface_rows_to_drop: 4
+  header_in_row_after_skip: true
+
+  meta_cells: #[row, col]
+    facility_name: [3, 2]
+    year_month_raw: [4, 4]
+
+  column_mapping:
+    "ｺｰﾄﾞ": "account_item_id"
+    "科目名称": "account_item_name"
+    "賃借": "dc_type"
+    "繰越": "carry_forward_amount"
+    "借方": "debit_amount"
+    "貸方": "credit_amount"
+    "残高": "balance"
+
+  parse_dates: []
+  trim_columns: []
+
+schema:
+  types:
+    year_month: date
+    account_item_id: text
+    carry_forward_amount: int
+    debit_amount: int
+    credit_amount: int
+    balance: int
+    account_item_name: text
+    dc_type: text
+    facility_name: text
+
+ingest:
+  target_table: "public.monthly_account_summary"
+  method: "insert"
+  upsert:
+    enabled: false
+  extra_columns:
+    import_datetime: "NOW()"
+
+database:
+  url: postgresql://user_sankoh_insert:p5wm9p2n2yc9@incrazetech-app-db-prod.app-prod.incrazetech.dev:5432/reservation_db_sankoh
+
+runtime:
+  max_files: 0

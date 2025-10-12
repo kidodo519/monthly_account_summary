@@ -124,9 +124,12 @@ def extract_meta_and_dataframe(
         row_vals = lines[r].split(sep)
         return row_vals[c].strip().strip('"') if c < len(row_vals) else None
 
+    ym_raw = _get_meta("year_month_raw")
+    ym = _parse_year_month_any(ym_raw or "")
     meta = {
         "facility_name": _get_meta("facility_name"),
-        "year_month": _get_meta("year_month_raw"),
+        "year_month_raw": ym_raw,
+        "year_month": ym.date() if ym is not None else None,
     }
     print(f"pos: {_coerce_pos(meta_cells.get('facility_name'))}")
 

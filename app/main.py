@@ -20,9 +20,20 @@ def load_config():
     else:
         base_path = os.path.dirname(__file__)
 
-    config_path = os.path.join(base_path, "config.yaml")
-    with open(config_path, "r", encoding="utf-8") as fp:
-        return yaml.safe_load(fp)
+    config_candidates = [
+        os.path.join(base_path, "config.yaml"),
+        os.path.join(base_path, "..", "config.yaml"),
+    ]
+
+    for cfg_path in config_candidates:
+        abs_path = os.path.abspath(cfg_path)
+        if os.path.exists(abs_path):
+            with open(abs_path, "r", encoding="utf-8") as fp:
+                return yaml.safe_load(fp)
+
+    raise FileNotFoundError(
+        f"config.yaml was not found in any of: {', '.join(map(os.path.abspath, config_candidates))}"
+    )
 
 
 def _cast_text(s: pd.Series) -> pd.Series:
@@ -100,10 +111,19 @@ def run_once():
     else:
         base_path = os.path.dirname(__file__)
 
-    env_path = os.path.join(base_path, ".env")
-    if os.path.exists(env_path):
-        load_dotenv(env_path, override=True)
-    else:
+    env_candidates = [
+        os.path.join(base_path, ".env"),
+        os.path.join(base_path, "..", ".env"),
+    ]
+
+    loaded_env = False
+    for env_path in env_candidates:
+        abs_path = os.path.abspath(env_path)
+        if os.path.exists(abs_path):
+            load_dotenv(abs_path, override=True)
+            loaded_env = True
+
+    if not loaded_env:
         load_dotenv(override=True)
 
     cfg = load_config()

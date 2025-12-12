@@ -344,7 +344,16 @@ def run_once():
                 file_result.update({"status": "processing_error", "detail": str(e)})
                 results.append(file_result)
 
-    _post_slack_notification(webhook_url, _summarize_results(results))
+    inserted_total = sum(
+        r.get("inserted", 0)
+        for r in results
+        if r.get("status") == "inserted"
+    )
+
+    if inserted_total > 0:
+        _post_slack_notification(webhook_url, _summarize_results(results))
+    else:
+        print("[RUN] inserts not performed -> skip Slack notification.")
 
 
 if __name__ == "__main__":

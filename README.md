@@ -27,7 +27,7 @@ pyinstaller --noconfirm --onefile --name monthly_account_summary \
 - ビルド後は `dist/monthly_account_summary.exe` を実行してください。
 
 ## Slack 通知
-- 実行開始と処理完了時に Slack Webhook へ通知を送る場合は、以下のいずれかで URL を指定してください。
+- Slack Webhook へ通知する場合は、以下のいずれかで URL を指定してください。
   - 環境変数 `SLACK_WEBHOOK_URL`
   - `config.yaml` の `runtime.slack_webhook_url`
-- 通知メッセージには対象ファイル数や挿入件数が含まれ、ファイル名は送信済みのものだけに表示されます。
+- 通知はインポートが 1 件以上発生した場合のみ送信され、メッセージには対象ファイル数や挿入件数、送信済みのファイル名のみが含まれます。

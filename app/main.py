@@ -3,6 +3,10 @@ import os
 import sys
 import tempfile
 from typing import List, Dict, Any
+import fnmatch
+import json
+import urllib.request
+import urllib.error
 import numpy as np
 import pandas as pd
 import yaml
@@ -104,8 +108,48 @@ def _print_dsn(pg: PostgresClient, table: str):
     except Exception as e:
         print(f"[DB] dsn_print_error={e}")
 
+
+def _post_slack_notification(webhook_url: str | None, message: str) -> None:
+    if not webhook_url:
+        return
+
+    try:
+        payload = json.dumps({"text": message}).encode("utf-8")
+        req = urllib.request.Request(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status >= 300:
+                print(f"[Slack] notification responded with status={resp.status}")
+    except Exception as e:
+        print(f"[Slack] notification failed: {e}")
+
+
+def _summarize_results(results: List[Dict[str, Any]]) -> str:
+    processed = [r for r in results if r.get("status") == "inserted"]
+    moved = [r for r in processed if r.get("moved")]
+    total_inserted = sum(r.get("inserted", 0) for r in processed)
+
+    lines = [
+        "[monthly_account_summary] 実行完了",
+        f"- 対象ファイル: {len(results)} 件",
+        f"- 挿入成功: {len(processed)} 件 / {total_inserted} 行 (アーカイブ移動 {len(moved)} 件)",
+    ]
+
+    if results:
+        lines.append("- 詳細:")
+        for r in results:
+            detail = r.get("detail")
+            detail_suffix = f" ({detail})" if detail else ""
+            lines.append(f"  ・{r.get('file')}: {r.get('status')} (inserted={r.get('inserted', 0)}){detail_suffix}")
+
+    return "\n".join(lines)
+
 def run_once():
- # base path / .env 読み込み
+    # base path / .env 読み込み
     if getattr(sys, "frozen", False):
         base_path = os.path.dirname(sys.executable)
     else:
@@ -127,6 +171,8 @@ def run_once():
         load_dotenv(override=True)
 
     cfg = load_config()
+
+    webhook_url = os.environ.get("SLACK_WEBHOOK_URL") or cfg.get("runtime", {}).get("slack_webhook_url")
 
     # Drive
     client = DriveClient()
@@ -161,8 +207,10 @@ def run_once():
         targets = [f for f in files if any(fnmatch.fnmatch(f.name, p) for p in patterns)]
     else:
         targets = files[:]
+    _post_slack_notification(webhook_url, f"[monthly_account_summary] 実行開始: 対象 {len(targets)} 件")
     if not targets:
         print("[RUN] no target files.")
+        _post_slack_notification(webhook_url, "[monthly_account_summary] 実行完了: 対象ファイルなし")
         return
 
     # CSV読取設定
@@ -187,88 +235,112 @@ def run_once():
     else:
         t_schema, t_name = "public", table
 
+    results: List[Dict[str, Any]] = []
+
     for f in targets:
+        file_result: Dict[str, Any] = {"file": f.name, "status": "unknown", "inserted": 0, "detail": None, "moved": False}
         with tempfile.TemporaryDirectory() as td:
             local_path = os.path.join(td, f.name)
-            client.download_file(f.id, local_path, mime_type_hint=f.mimeType)
-
-            # CSV → DF + メタ抽出
-            df_raw, meta = extract_meta_and_dataframe(
-                csv_path=local_path,
-                encoding=encoding,
-                sep=sep,
-                preface_rows_to_drop=preface_rows_to_drop,
-                header_in_row_after_skip=header_in_row_after_skip,
-                meta_cells=meta_cells,
-            )
-
-            # ログ：原データの概要
             try:
-                raw_cols = list(df_raw.columns)
-            except Exception:
-                raw_cols = []
-            print(f"[{f.name}] raw rows={len(df_raw)} cols={raw_cols} meta={meta}")
-
-            # マッピング適用
-            df = transform_with_mapping(df_raw.copy(), column_mapping=column_mapping)
-            df["facility_name"] = _normalize_facility(meta.get("facility_name"))
-            df["year_month"] = meta.get("year_month")
-
-            # 型変換・不足列の補完
-            df = _ensure_columns(df, schema_types.keys())
-            for col, kind in schema_types.items():
-                if col not in df.columns:
-                    continue
-                if kind == "int":
-                    df[col] = _cast_int(df[col])
-                elif kind == "date":
-                    df[col] = _cast_date(df[col])
-                else:
-                    df[col] = _cast_text(df[col])
-
-            # ログ：マッピング後の概要
-            print(f"[{f.name}] mapped rows={len(df)} cols={list(df.columns)}")
-
-            # テーブルと共通カラムで絞る
-            common = [c for c in table_cols if c in df.columns]
-            if not common:
-                print(f"[{f.name}] no common columns with table {table}. table_cols(sample)={table_cols[:8]} df_cols(sample)={[*df.columns][:8]}")
-                # 共通カラム0ならアーカイブせずに次へ
-                continue
-            df = df[common]
-
-            # 空なら挿入もアーカイブもしない
-            if df.empty:
-                print(f"[{f.name}] DataFrame is empty after transform. Skip insert & keep file.")
-                continue
-
-            # 挿入前後の行数で実増分を確認
-            try:
-                with pg._conn() as conn, conn.cursor() as cur:
-                    cur.execute(f'SELECT COUNT(*) FROM "{t_schema}"."{t_name}"')
-                    before = cur.fetchone()[0]
-
-                    if cfg["ingest"].get("method", "insert") == "copy":
-                        # copy_dataframe は insert_dataframe のラッパー想定
-                        pg.copy_dataframe(df, table)
-                    else:
-                        pg.insert_dataframe(df, table)
-
-                    cur.execute(f'SELECT COUNT(*) FROM "{t_schema}"."{t_name}"')
-                    after = cur.fetchone()[0]
-                    delta = after - before
+                client.download_file(f.id, local_path, mime_type_hint=f.mimeType)
             except Exception as e:
-                print(f"[{f.name}] INSERT error: {e}")
-                # エラー時は移動しない
+                file_result.update({"status": "download_error", "detail": str(e)})
+                results.append(file_result)
                 continue
 
-            print(f"[{f.name}] inserted_rows={delta} (before={before} -> after={after})")
+            try:
+                # CSV → DF + メタ抽出
+                df_raw, meta = extract_meta_and_dataframe(
+                    csv_path=local_path,
+                    encoding=encoding,
+                    sep=sep,
+                    preface_rows_to_drop=preface_rows_to_drop,
+                    header_in_row_after_skip=header_in_row_after_skip,
+                    meta_cells=meta_cells,
+                )
 
-            if delta > 0:
-                client.move_file(f.id, archive_folder_id)
-                print(f"Processed and moved: {f.name} (inserted {delta} rows)")
-            else:
-                print(f"[{f.name}] actual insert 0 rows → Skip moving to archive.")
+                # ログ：原データの概要
+                try:
+                    raw_cols = list(df_raw.columns)
+                except Exception:
+                    raw_cols = []
+                print(f"[{f.name}] raw rows={len(df_raw)} cols={raw_cols} meta={meta}")
+
+                # マッピング適用
+                df = transform_with_mapping(df_raw.copy(), column_mapping=column_mapping)
+                df["facility_name"] = _normalize_facility(meta.get("facility_name"))
+                df["year_month"] = meta.get("year_month")
+
+                # 型変換・不足列の補完
+                df = _ensure_columns(df, schema_types.keys())
+                for col, kind in schema_types.items():
+                    if col not in df.columns:
+                        continue
+                    if kind == "int":
+                        df[col] = _cast_int(df[col])
+                    elif kind == "date":
+                        df[col] = _cast_date(df[col])
+                    else:
+                        df[col] = _cast_text(df[col])
+
+                # ログ：マッピング後の概要
+                print(f"[{f.name}] mapped rows={len(df)} cols={list(df.columns)}")
+
+                # テーブルと共通カラムで絞る
+                common = [c for c in table_cols if c in df.columns]
+                if not common:
+                    print(f"[{f.name}] no common columns with table {table}. table_cols(sample)={table_cols[:8]} df_cols(sample)={[*df.columns][:8]}")
+                    # 共通カラム0ならアーカイブせずに次へ
+                    file_result.update({"status": "no_common_columns"})
+                    results.append(file_result)
+                    continue
+                df = df[common]
+
+                # 空なら挿入もアーカイブもしない
+                if df.empty:
+                    print(f"[{f.name}] DataFrame is empty after transform. Skip insert & keep file.")
+                    file_result.update({"status": "empty_after_transform"})
+                    results.append(file_result)
+                    continue
+
+                # 挿入前後の行数で実増分を確認
+                try:
+                    with pg._conn() as conn, conn.cursor() as cur:
+                        cur.execute(f'SELECT COUNT(*) FROM "{t_schema}"."{t_name}"')
+                        before = cur.fetchone()[0]
+
+                        if cfg["ingest"].get("method", "insert") == "copy":
+                            # copy_dataframe は insert_dataframe のラッパー想定
+                            pg.copy_dataframe(df, table)
+                        else:
+                            pg.insert_dataframe(df, table)
+
+                        cur.execute(f'SELECT COUNT(*) FROM "{t_schema}"."{t_name}"')
+                        after = cur.fetchone()[0]
+                        delta = after - before
+                except Exception as e:
+                    print(f"[{f.name}] INSERT error: {e}")
+                    # エラー時は移動しない
+                    file_result.update({"status": "insert_error", "detail": str(e)})
+                    results.append(file_result)
+                    continue
+
+                print(f"[{f.name}] inserted_rows={delta} (before={before} -> after={after})")
+                file_result.update({"status": "inserted", "inserted": delta})
+
+                if delta > 0:
+                    client.move_file(f.id, archive_folder_id)
+                    print(f"Processed and moved: {f.name} (inserted {delta} rows)")
+                    file_result.update({"moved": True})
+                else:
+                    print(f"[{f.name}] actual insert 0 rows → Skip moving to archive.")
+
+                results.append(file_result)
+            except Exception as e:
+                file_result.update({"status": "processing_error", "detail": str(e)})
+                results.append(file_result)
+
+    _post_slack_notification(webhook_url, _summarize_results(results))
 
 
 if __name__ == "__main__":

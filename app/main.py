@@ -133,18 +133,22 @@ def _summarize_results(results: List[Dict[str, Any]]) -> str:
     moved = [r for r in processed if r.get("moved")]
     total_inserted = sum(r.get("inserted", 0) for r in processed)
 
+    sent = [r for r in processed if r.get("inserted", 0) > 0 or r.get("moved")]
+
     lines = [
         "[monthly_account_summary] 実行完了",
         f"- 対象ファイル: {len(results)} 件",
         f"- 挿入成功: {len(processed)} 件 / {total_inserted} 行 (アーカイブ移動 {len(moved)} 件)",
     ]
 
-    if results:
-        lines.append("- 詳細:")
-        for r in results:
+    if sent:
+        lines.append("- 詳細(送信済みのみ):")
+        for r in sent:
             detail = r.get("detail")
             detail_suffix = f" ({detail})" if detail else ""
-            lines.append(f"  ・{r.get('file')}: {r.get('status')} (inserted={r.get('inserted', 0)}){detail_suffix}")
+            lines.append(
+                f"  ・{r.get('file')}: {r.get('status')} (inserted={r.get('inserted', 0)}){detail_suffix}"
+            )
 
     return "\n".join(lines)
 

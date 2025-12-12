@@ -164,6 +164,16 @@ def _should_notify(results: List[Dict[str, Any]]) -> bool:
         for r in results
     )
 
+
+def _notify_if_needed(webhook_url: str | None, results: List[Dict[str, Any]]) -> None:
+    """Guard Slack webhook execution so zero-target runs never trigger notifications."""
+
+    if not _should_notify(results):
+        print("[RUN] inserts not performed -> skip Slack notification.")
+        return
+
+    _post_slack_notification(webhook_url, _summarize_results(results))
+
 def run_once():
     # base path / .env 読み込み
     if getattr(sys, "frozen", False):
@@ -355,10 +365,7 @@ def run_once():
                 file_result.update({"status": "processing_error", "detail": str(e)})
                 results.append(file_result)
 
-    if _should_notify(results):
-        _post_slack_notification(webhook_url, _summarize_results(results))
-    else:
-        print("[RUN] inserts not performed -> skip Slack notification.")
+    _notify_if_needed(webhook_url, results)
 
 
 if __name__ == "__main__":

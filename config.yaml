@@ -52,3 +52,4 @@ database:
 
 runtime:
   max_files: 0
+  slack_webhook_url: ""

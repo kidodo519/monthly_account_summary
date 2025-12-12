@@ -156,20 +156,16 @@ def _summarize_results(results: List[Dict[str, Any]]) -> str:
 def _should_notify(results: List[Dict[str, Any]]) -> bool:
     """Return True if any file produced inserted rows that were sent/moved."""
 
-    if not results:
-        return False
-
-    return any(
-        r.get("status") == "inserted" and r.get("inserted", 0) > 0
-        for r in results
-    )
+    # Drive フォルダに対象が 0 件のときは results 自体が空になる。"絶対に送らない"
+    # 条件を担保しつつ、1 件でも処理していれば（挿入行数 0 行でも）通知する。
+    return bool(results)
 
 
 def _notify_if_needed(webhook_url: str | None, results: List[Dict[str, Any]]) -> None:
     """Guard Slack webhook execution so zero-target runs never trigger notifications."""
 
     if not _should_notify(results):
-        print("[RUN] inserts not performed -> skip Slack notification.")
+        print("[RUN] no files processed -> skip Slack notification.")
         return
 
     _post_slack_notification(webhook_url, _summarize_results(results))
@@ -233,10 +229,11 @@ def run_once():
         targets = [f for f in files if any(fnmatch.fnmatch(f.name, p) for p in patterns)]
     else:
         targets = files[:]
-    _post_slack_notification(webhook_url, f"[monthly_account_summary] 実行開始: 対象 {len(targets)} 件")
     if not targets:
         print("[RUN] no target files -> skip Slack notification.")
         return
+
+    _post_slack_notification(webhook_url, f"[monthly_account_summary] 実行開始: 対象 {len(targets)} 件")
 
     # CSV読取設定
     csv_cfg = cfg["csv"]

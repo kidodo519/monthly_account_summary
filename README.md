@@ -30,4 +30,4 @@ pyinstaller --noconfirm --onefile --name monthly_account_summary \
 - Slack Webhook へ通知する場合は、以下のいずれかで URL を指定してください。
   - 環境変数 `SLACK_WEBHOOK_URL`
   - `config.yaml` の `runtime.slack_webhook_url`
-- 通知はインポートが 1 件以上発生した場合のみ送信され、メッセージには対象ファイル数や挿入件数、送信済みのファイル名のみが含まれます。
+- 通知はインポートが 1 件以上発生した場合のみ送信され、メッセージには対象ファイル数や挿入件数、送信済みのファイル名のみが含まれます。Drive 内に対象ファイルが無い場合は Slack へ何も送信されません。

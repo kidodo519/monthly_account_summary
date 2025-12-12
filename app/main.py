@@ -152,6 +152,18 @@ def _summarize_results(results: List[Dict[str, Any]]) -> str:
 
     return "\n".join(lines)
 
+
+def _should_notify(results: List[Dict[str, Any]]) -> bool:
+    """Return True if any file produced inserted rows that were sent/moved."""
+
+    if not results:
+        return False
+
+    return any(
+        r.get("status") == "inserted" and r.get("inserted", 0) > 0
+        for r in results
+    )
+
 def run_once():
     # base path / .env 読み込み
     if getattr(sys, "frozen", False):
@@ -213,8 +225,7 @@ def run_once():
         targets = files[:]
     _post_slack_notification(webhook_url, f"[monthly_account_summary] 実行開始: 対象 {len(targets)} 件")
     if not targets:
-        print("[RUN] no target files.")
-        _post_slack_notification(webhook_url, "[monthly_account_summary] 実行完了: 対象ファイルなし")
+        print("[RUN] no target files -> skip Slack notification.")
         return
 
     # CSV読取設定
@@ -344,13 +355,7 @@ def run_once():
                 file_result.update({"status": "processing_error", "detail": str(e)})
                 results.append(file_result)
 
-    inserted_total = sum(
-        r.get("inserted", 0)
-        for r in results
-        if r.get("status") == "inserted"
-    )
-
-    if inserted_total > 0:
+    if _should_notify(results):
         _post_slack_notification(webhook_url, _summarize_results(results))
     else:
         print("[RUN] inserts not performed -> skip Slack notification.")

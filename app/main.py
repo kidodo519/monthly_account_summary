@@ -223,6 +223,7 @@ def run_once():
         targets = [f for f in files if any(fnmatch.fnmatch(f.name, p) for p in patterns)]
     else:
         targets = files[:]
+    _post_slack_notification(webhook_url, f"[monthly_account_summary] 実行開始: 対象 {len(targets)} 件")
     if not targets:
         print("[RUN] no target files -> skip Slack notification.")
         return

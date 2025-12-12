@@ -28,7 +28,7 @@ def _load_sa_credentials():
     サービスアカウント認証を3段フォールバックで解決:
     1) GOOGLE_APPLICATION_CREDENTIALS = 既存ファイルパス
     2) GOOGLE_APPLICATION_CREDENTIALS_JSON = JSON文字列
-    3) exe同梱の app/credentials.json
+    3) exe同梱 / プロジェクト直下の credentials.json
     """
     # 1) 既存ファイルパス
     cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -48,12 +48,18 @@ def _load_sa_credentials():
         except json.JSONDecodeError:
             raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS_JSON が不正なJSONです。")
 
-    # 3) バンドル済み credentials.json（PyInstaller --add-data "app\\credentials.json;app"）
-    bundled = resource_path("credentials.json")
-    if os.path.exists(bundled):
-        return service_account.Credentials.from_service_account_file(
-            bundled, scopes=SCOPES
-        )
+    # 3) バンドル済み credentials.json（PyInstaller --add-data "app\\credentials.json;app"）や
+    #    プロジェクト直下に配置された credentials.json
+    default_candidates = [
+        resource_path("credentials.json"),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "credentials.json")),
+    ]
+
+    for path in default_candidates:
+        if os.path.exists(path):
+            return service_account.Credentials.from_service_account_file(
+                path, scopes=SCOPES
+            )
 
     raise RuntimeError(
         "Service account JSON not found.\n"
